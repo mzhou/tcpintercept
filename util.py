@@ -20,10 +20,9 @@ def recv_until_block(s, bufsize):
                 break
             buffers.append(d)
         except socket.error, e:
-            if e[0] == errno.EWOULDBLOCK:
-                break
-            else:
-                raise
+            if e[0] != errno.EWOULDBLOCK:
+                disconnected = True
+            break
     return (buffers, disconnected)
 
 def send_until_block(s, d):

@@ -70,6 +70,8 @@ class Connection(object):
         self._to_local_buf = deque_buffer.DequeBuffer()
         self._local_disconnected = False
         self._remote_disconnected = False
+        self._local_writable = True
+        self._remote_writable = True
 
     def begin_connect(self):
         self._cbp.register(self._rs, self.connect_callback)
@@ -106,6 +108,7 @@ class Connection(object):
         if event & select.POLLIN:
             buffers, self._local_disconnected = util.recv_until_block(self._ls, 1*1024*1024)
             self._to_remote_buf.extend(buffers)
+        self._check_writable()
         self._check_cleanup()
 
     def remote_poll_callback(self, fd, event):
@@ -119,7 +122,23 @@ class Connection(object):
         if event & select.POLLIN:
             buffers, self._remote_disconnected = util.recv_until_block(self._rs, 1*1024*1024)
             self._to_local_buf.extend(buffers)
+        self._check_writable()
         self._check_cleanup()
+
+    def _check_writable(self):
+        if self._to_remote_buf and not self._remote_writable:
+            self._cbp.modify(self._rs, select.POLLIN | select.POLLOUT)
+            self._remote_writable = True
+        if self._to_local_buf and not self._local_writable:
+            self._cbp.modify(self._ls, select.POLLIN | select.POLLOUT)
+            self._local_writable = True
+
+        if not self._to_remote_buf and self._remote_writable:
+            self._cbp.modify(self._rs, select.POLLIN)
+            self._remote_writable = False
+        if not self._to_local_buf and self._local_writable:
+            self._cbp.modify(self._ls, select.POLLIN)
+            self._local_writable = False
 
     def _check_cleanup(self):
         if ((self._remote_disconnected and not self._to_local_buf)
@@ -174,8 +193,11 @@ def main(argv):
     ss.listen(128)
     l = Listener(cbp, connection_factory, config.listen_port, ss)
 
+    i = 0
     while True:
         cbp.poll()
+        print 'poll {}'.format(i)
+        i += 1
 
     return 0
 
