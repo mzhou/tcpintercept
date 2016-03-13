@@ -68,6 +68,8 @@ class Connection(object):
         self._rs = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._to_remote_buf = deque_buffer.DequeBuffer()
         self._to_local_buf = deque_buffer.DequeBuffer()
+        self._local_disconnected = False
+        self._remote_disconnected = False
 
     def begin_connect(self):
         self._cbp.register(self._rs, self.connect_callback)
@@ -98,46 +100,31 @@ class Connection(object):
         if event & select.POLLOUT:
             if self._to_local_buf:
                 d = self._to_local_buf.popleftall()
-                sent = self._ls.send(d)
+                sent = util.send_until_block(self._ls, d)
                 if sent < len(d):
                     self._to_local_buf.appendleft(d[sent:])
         if event & select.POLLIN:
-            while True:
-                try:
-                    d = self._ls.recv(1 * 1024 * 1024)
-                    if not d:
-                        # disconnected
-                        self._disconnected()
-                        break
-                    self._to_remote_buf.append(d)
-                except socket.error, e:
-                    if e[0] == errno.EWOULDBLOCK:
-                        break
-                    else:
-                        raise
+            buffers, self._local_disconnected = util.recv_until_block(self._ls, 1*1024*1024)
+            self._to_remote_buf.extend(buffers)
+        self._check_cleanup()
 
     def remote_poll_callback(self, fd, event):
         assert fd == self._rs.fileno()
         if event & select.POLLOUT:
             if self._to_remote_buf:
                 d = self._to_remote_buf.popleftall()
-                sent = self._rs.send(d)
+                sent = util.send_until_block(self._rs, d)
                 if sent < len(d):
                     self._to_remote_buf.appendleft(d[sent:])
         if event & select.POLLIN:
-            while True:
-                try:
-                    d = self._rs.recv(1 * 1024 * 1024)
-                    if not d:
-                        # disconnected
-                        self._disconnected()
-                        break
-                    self._to_local_buf.append(d)
-                except socket.error, e:
-                    if e[0] == errno.EWOULDBLOCK:
-                        break
-                    else:
-                        raise
+            buffers, self._remote_disconnected = util.recv_until_block(self._rs, 1*1024*1024)
+            self._to_local_buf.extend(buffers)
+        self._check_cleanup()
+
+    def _check_cleanup(self):
+        if ((self._remote_disconnected and not self._to_local_buf)
+                or (self._local_disconnected and not self._to_remote_buf)):
+            self._disconnected()
 
     def _disconnected(self):
         self._cbp.unregister(self._rs)
@@ -146,10 +133,11 @@ class Connection(object):
         self._ls.close()
 
 class Listener(object):
-    def __init__(self, cbp, connection_factory, ss):
+    def __init__(self, cbp, connection_factory, banned_port, ss):
         super(Listener, self).__init__()
         self._cbp = cbp
         self._connection_factory = connection_factory
+        self._banned_port = banned_port
         self._ss = ss
         self._cbp.register(ss, self.poll_callback)
 
@@ -158,8 +146,12 @@ class Listener(object):
         assert event & select.POLLIN
         cs, src = self._ss.accept()
         dst = util.get_original_dst(cs)
-        conn = self._connection_factory(cs, src, dst)
-        conn.begin_connect()
+        if dst[1] == self._banned_port:
+            # probable direct connection to the proxy
+            cs.close()
+        else:
+            conn = self._connection_factory(cs, src, dst)
+            conn.begin_connect()
 
 def main(argv):
     config = Config(
@@ -180,7 +172,7 @@ def main(argv):
     ss.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     ss.bind((config.listen_ip, config.listen_port))
     ss.listen(128)
-    l = Listener(cbp, connection_factory, ss)
+    l = Listener(cbp, connection_factory, config.listen_port, ss)
 
     while True:
         cbp.poll()

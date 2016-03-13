@@ -15,6 +15,9 @@ class DequeBuffer(object):
         self._len += len(o)
         return self._q.appendleft(o)
 
+    def extend(self, l):
+        map(self.append, l)
+
     def popleft(self, n):
         ret = []
         so_far = 0
