@@ -193,11 +193,8 @@ def main(argv):
     ss.listen(128)
     l = Listener(cbp, connection_factory, config.listen_port, ss)
 
-    i = 0
     while True:
         cbp.poll()
-        print 'poll {}'.format(i)
-        i += 1
 
     return 0
 
