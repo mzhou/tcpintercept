@@ -72,6 +72,8 @@ class Connection(object):
         self._remote_disconnected = False
         self._local_writable = True
         self._remote_writable = True
+        self._to_remote_peak = 0
+        self._to_local_peak = 0
 
     def begin_connect(self):
         self._cbp.register(self._rs, self.connect_callback)
@@ -102,12 +104,15 @@ class Connection(object):
         if event & select.POLLOUT:
             if self._to_local_buf:
                 d = self._to_local_buf.popleftall()
-                sent = util.send_until_block(self._ls, d)
-                if sent < len(d):
+                sent, self._local_disconnected = util.send_until_block(self._ls, d)
+                if self._local_disconnected:
+                    self._to_local_buf.clear()
+                elif sent < len(d):
                     self._to_local_buf.appendleft(d[sent:])
         if event & select.POLLIN:
             buffers, self._local_disconnected = util.recv_until_block(self._ls, 1*1024*1024)
             self._to_remote_buf.extend(buffers)
+        self._update_peaks()
         self._check_writable()
         self._check_cleanup()
 
@@ -116,14 +121,35 @@ class Connection(object):
         if event & select.POLLOUT:
             if self._to_remote_buf:
                 d = self._to_remote_buf.popleftall()
-                sent = util.send_until_block(self._rs, d)
-                if sent < len(d):
+                sent, self._remote_disconnected = util.send_until_block(self._rs, d)
+                if self._remote_disconnected:
+                    self._to_remote_buf.clear()
+                elif sent < len(d):
                     self._to_remote_buf.appendleft(d[sent:])
         if event & select.POLLIN:
             buffers, self._remote_disconnected = util.recv_until_block(self._rs, 1*1024*1024)
             self._to_local_buf.extend(buffers)
+        self._update_peaks()
         self._check_writable()
         self._check_cleanup()
+
+    def _update_peaks(self):
+        if len(self._to_remote_buf) > self._to_remote_peak:
+            print '{}:{}->{}:{} Peak={}'.format(
+                self._src[0],
+                self._src[1],
+                self._dst[0],
+                self._dst[1],
+                len(self._to_remote_buf))
+            self._to_remote_peak = len(self._to_remote_buf)
+        if len(self._to_local_buf) > self._to_local_peak:
+            print '{}:{}->{}:{} Peak={}'.format(
+                self._dst[0],
+                self._dst[1],
+                self._src[0],
+                self._src[1],
+                len(self._to_local_buf))
+            self._to_local_peak = len(self._to_local_buf)
 
     def _check_writable(self):
         if self._to_remote_buf and not self._remote_writable:

@@ -27,6 +27,7 @@ def recv_until_block(s, bufsize):
 
 def send_until_block(s, d):
     sent = 0
+    disconnected = False
     while sent < len(d):
         try:
             if sent == 0:
@@ -37,8 +38,8 @@ def send_until_block(s, d):
                 break
             sent += this_sent
         except socket.error, e:
-            if e[0] == errno.EWOULDBLOCK:
+            if e[0] != errno.EWOULDBLOCK:
+                disconnected = True
                 break
-            else:
-                raise
-    return sent
+            break
+    return (sent, disconnected)
