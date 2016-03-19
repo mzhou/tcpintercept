@@ -84,7 +84,7 @@ class Connection(object):
 
     def connect_callback(self, fd, event):
         assert fd == self._rs.fileno()
-        assert event & select.POLLOUT
+        #assert event & select.POLLOUT
         err = self._rs.connect_ex(self._dst)
         if err not in (0, errno.EINPROGRESS):
             self._connect_failed()

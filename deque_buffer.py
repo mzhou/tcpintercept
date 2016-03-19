@@ -37,5 +37,9 @@ class DequeBuffer(object):
     def popleftall(self):
         return self.popleft(len(self))
 
+    def clear(self):
+        self._q.clear()
+        self._len = 0
+
     def __len__(self):
         return self._len
