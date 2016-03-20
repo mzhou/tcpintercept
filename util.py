@@ -11,6 +11,7 @@ def get_original_dst(s):
 
 def recv_until_block(s, bufsize):
     buffers = []
+    total_len = 0
     disconnected = False
     while True:
         try:
@@ -19,11 +20,12 @@ def recv_until_block(s, bufsize):
                 disconnected = True
                 break
             buffers.append(d)
+            total_len += len(d)
         except socket.error, e:
             if e[0] != errno.EWOULDBLOCK:
                 disconnected = True
             break
-    return (buffers, disconnected)
+    return (buffers, disconnected, total_len)
 
 def send_until_block(s, d):
     sent = 0

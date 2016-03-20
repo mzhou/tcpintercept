@@ -77,6 +77,8 @@ class Connection(object):
 
     def begin_connect(self):
         self._cbp.register(self._rs, self.connect_callback)
+        if self._bind:
+            self._rs.bind(self._bind)
         self._rs.setblocking(0)
         err = self._rs.connect_ex(self._dst)
         if err not in (0, errno.EINPROGRESS):
@@ -105,12 +107,14 @@ class Connection(object):
             if self._to_local_buf:
                 d = self._to_local_buf.popleftall()
                 sent, self._local_disconnected = util.send_until_block(self._ls, d)
+                print '{} Sent={}'.format(self._to_local_str(), sent)
                 if self._local_disconnected:
                     self._to_local_buf.clear()
                 elif sent < len(d):
                     self._to_local_buf.appendleft(d[sent:])
         if event & select.POLLIN:
-            buffers, self._local_disconnected = util.recv_until_block(self._ls, 1*1024*1024)
+            buffers, self._local_disconnected, total_len = util.recv_until_block(self._ls, 1*1024*1024)
+            print '{} Recv={}'.format(self._to_remote_str(), total_len)
             self._to_remote_buf.extend(buffers)
         self._update_peaks()
         self._check_writable()
@@ -122,32 +126,42 @@ class Connection(object):
             if self._to_remote_buf:
                 d = self._to_remote_buf.popleftall()
                 sent, self._remote_disconnected = util.send_until_block(self._rs, d)
+                print '{} Sent={}'.format(self._to_remote_str(), sent)
                 if self._remote_disconnected:
                     self._to_remote_buf.clear()
                 elif sent < len(d):
                     self._to_remote_buf.appendleft(d[sent:])
         if event & select.POLLIN:
-            buffers, self._remote_disconnected = util.recv_until_block(self._rs, 1*1024*1024)
+            buffers, self._remote_disconnected, total_len = util.recv_until_block(self._rs, 1*1024*1024)
+            print '{} Recv={}'.format(self._to_local_str(), total_len)
             self._to_local_buf.extend(buffers)
         self._update_peaks()
         self._check_writable()
         self._check_cleanup()
 
+    def _to_local_str(self):
+        return '{}:{}->{}:{}'.format(
+            self._dst[0],
+            self._dst[1],
+            self._src[0],
+            self._src[1])
+
+    def _to_remote_str(self):
+        return '{}:{}->{}:{}'.format(
+            self._src[0],
+            self._src[1],
+            self._dst[0],
+            self._dst[1])
+
     def _update_peaks(self):
         if len(self._to_remote_buf) > self._to_remote_peak:
-            print '{}:{}->{}:{} Peak={}'.format(
-                self._src[0],
-                self._src[1],
-                self._dst[0],
-                self._dst[1],
+            print '{} Peak={}'.format(
+                self._to_remote_str(),
                 len(self._to_remote_buf))
             self._to_remote_peak = len(self._to_remote_buf)
         if len(self._to_local_buf) > self._to_local_peak:
-            print '{}:{}->{}:{} Peak={}'.format(
-                self._dst[0],
-                self._dst[1],
-                self._src[0],
-                self._src[1],
+            print '{} Peak={}'.format(
+                self._to_local_str(),
                 len(self._to_local_buf))
             self._to_local_peak = len(self._to_local_buf)
 
@@ -202,8 +216,8 @@ def main(argv):
     config = Config(
         argv[1],
         int(argv[2]),
-        argv[3] if len(argv) >= 4 else None,
-        argv[4] if len(argv) >= 5 else None,
+        argv[3] if len(argv) >= 4 else '',
+        argv[4] if len(argv) >= 5 else 0,
     )
 
     cbp = CallbackPoll()
